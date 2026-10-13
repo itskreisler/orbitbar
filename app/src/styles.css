@@ -230,10 +230,84 @@ body.moon .bar {
 }
 
 /*
- * Token-usage panel (agent-usage / agent-usage:<agent>). Layout only — the
- * numbers and status text come from app/src/usage-view.ts (status, totals,
- * cost, top projects).
+ * Generic section views (section:<id>).
  */
+.section-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section-header {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--ob-bar-border);
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ob-hover-fg);
+}
+
+.section-subtitle {
+  font-size: var(--ob-font-size);
+  color: var(--ob-text-dim);
+  margin-top: 2px;
+}
+
+.section-card {
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--ob-bar-border);
+  border-radius: var(--ob-radius-handle);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.section-card-title {
+  font-weight: 600;
+  color: var(--ob-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-badge {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--ob-hover-bg);
+  color: var(--ob-hover-fg);
+}
+
+.section-card-desc {
+  color: var(--ob-text-dim);
+  font-size: var(--ob-font-size);
+}
+
+.section-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.section-item-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--ob-font-size);
+}
+
+.section-item-label {
+  color: var(--ob-text-dim);
+}
+
+.section-item-value {
+  color: var(--ob-text);
+  font-weight: 500;
+}
+
 /*
  * `panel:<program>` output: preformatted monospace text that keeps its line
  * breaks and column alignment, themed with the panel tokens. Long lines scroll

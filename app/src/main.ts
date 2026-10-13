@@ -17,14 +17,11 @@ import {
 } from "./placement-view";
 import { describePanelOutput, type PanelOutput } from "./panel-output-view";
 import {
-  agentFromAction,
-  buildPanelViewModel,
-  isUsageAction,
-  WINDOW_OPTIONS,
-  type AgentSectionViewModel,
-  type TimeWindow,
-  type UsageSnapshot,
-} from "./usage-view";
+  buildSectionViewModel,
+  isSectionAction,
+  renderSectionView,
+  sectionFromAction,
+} from "./section-view";
 
 export interface ThemePalette {
   name: string;
@@ -406,7 +403,6 @@ function buildContextMenuActions(
   cfg: OrbitbarConfig,
   handlers: {
     openConfig: () => void | Promise<void>;
-    openPricing: () => void | Promise<void>;
     toggleCollapsed: () => void | Promise<void>;
     reloadConfig: () => void | Promise<void>;
     setTheme: (theme: ThemeName) => void | Promise<void>;
@@ -419,7 +415,6 @@ function buildContextMenuActions(
 ): (ContextMenuAction | "separator")[] {
   return [
     { label: "Edit config", run: handlers.openConfig },
-    { label: "Open pricing file", run: handlers.openPricing },
     {
       label: cfg.collapsed ? "Expand" : "Collapse",
       run: handlers.toggleCollapsed,
@@ -536,19 +531,20 @@ async function showActionPlaceholder(
   await showPanelMessage(`${id}: ${action}`, body, togglePanel);
 }
 
+/** Command execution sequence counter to avoid stale updates. */
+let commandFetchToken = 0;
+
 /**
  * Opens the panel on a `panel:<program> [args]` action: runs the program once
  * through `run_panel_command` (which sends back its cleaned-up output, exit
- * code and timeout state) and shows the text preformatted. Like the usage
- * panel, it fetches on open only; clicking the cell again closes the panel.
- * The output is set with `textContent`, never as HTML.
+ * code and timeout state) and shows the text preformatted.
  */
 async function openCommandPanel(
   id: string,
   body: HTMLElement,
   togglePanel: (open: boolean) => Promise<void>,
 ): Promise<void> {
-  const token = ++usageFetchToken;
+  const token = ++commandFetchToken;
   body.replaceChildren();
   const running = document.createElement("div");
   running.className = "usage-line usage-line--dim";
@@ -566,7 +562,7 @@ async function openCommandPanel(
     view.className = "usage-line usage-error";
     view.textContent = String(err);
   }
-  if (token !== usageFetchToken) return; // superseded by a newer panel action
+  if (token !== commandFetchToken) return; // superseded by a newer panel action
   body.replaceChildren(view);
 }
 
@@ -642,196 +638,17 @@ function setPanelUi(open: boolean): void {
 }
 
 /**
- * Token-usage panel: renders `get_usage(window)` for either every agent
- * (`agent-usage`) or one agent (`agent-usage:<agent>`): status, totals,
- * cost, then up to 5 top projects. There is no refresh timer — the panel
- * fetches on open and on window change only, never background polling.
+ * Opens a section view in the side panel.
  */
-
-/** Which agent filter (or "all") is currently shown, so a window-selector
- * change re-fetches the same view instead of resetting to "all agents". */
-let usagePanelFilter: string | null = null;
-/** The selector's current window. Session-only: reset to Today whenever the
- * panel opens from closed, never written to config. */
-let usageWindow: TimeWindow = "today";
-/** Guards against a stale response winning a race when the panel is
- * reopened, or the window changed, before the previous fetch resolved. */
-let usageFetchToken = 0;
-
-function usageStatusBadge(status: AgentSectionViewModel["status"]): string {
-  if (status.state === "ok") return "";
-  return status.state === "notInstalled" ? " (not installed)" : " (error)";
-}
-
-/** One agent's block: name/status, totals, cost, then its top projects. */
-function renderUsageSection(section: AgentSectionViewModel): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "usage-section";
-
-  const heading = document.createElement("div");
-  heading.className = "usage-agent-name";
-  heading.textContent = `${section.displayName}${usageStatusBadge(section.status)}`;
-  el.appendChild(heading);
-
-  if (!section.totals) {
-    const line = document.createElement("div");
-    line.className = "usage-line usage-line--dim";
-    line.textContent = section.statusText;
-    el.appendChild(line);
-    return el;
-  }
-
-  const totals = section.totals;
-  const tokenLine = document.createElement("div");
-  tokenLine.className = "usage-line";
-  tokenLine.textContent = `in ${totals.input}  out ${totals.output}  cache ${totals.cacheRead}/${totals.cacheWrite}`;
-  el.appendChild(tokenLine);
-
-  if (totals.reasoning) {
-    const reasoningLine = document.createElement("div");
-    reasoningLine.className = "usage-line usage-line--dim";
-    reasoningLine.textContent = `reasoning ${totals.reasoning}  ·  ${totals.entries} entries`;
-    el.appendChild(reasoningLine);
-  } else {
-    const entriesLine = document.createElement("div");
-    entriesLine.className = "usage-line usage-line--dim";
-    entriesLine.textContent = `${totals.entries} entries`;
-    el.appendChild(entriesLine);
-  }
-
-  const costLine = document.createElement("div");
-  costLine.className = "usage-line usage-cost";
-  costLine.textContent = totals.cost;
-  el.appendChild(costLine);
-
-  if (section.topProjects.length > 0) {
-    const projects = document.createElement("div");
-    projects.className = "usage-projects";
-    for (const project of section.topProjects) {
-      const row = document.createElement("div");
-      row.className = "usage-project-row";
-      // The full normalized path, so a disambiguated or truncated name never
-      // loses the real location.
-      row.title = project.path;
-
-      const name = document.createElement("span");
-      name.className = "usage-project-name";
-      name.textContent = project.name;
-      row.appendChild(name);
-
-      const stats = document.createElement("span");
-      stats.className = "usage-project-stats";
-      stats.textContent = `${project.output}  ${project.cost}`;
-      row.appendChild(stats);
-
-      projects.appendChild(row);
-    }
-    el.appendChild(projects);
-  }
-
-  return el;
-}
-
-/** The window selector row (Today / 7 days / 30 days / This month). */
-function renderWindowSelector(
-  onChange: (next: TimeWindow) => void,
-): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "usage-window-row";
-
-  const select = document.createElement("select");
-  select.className = "usage-window-select";
-  select.setAttribute("aria-label", "Usage time window");
-  for (const option of WINDOW_OPTIONS) {
-    const opt = document.createElement("option");
-    opt.value = option.value;
-    opt.textContent = option.label;
-    if (option.value === usageWindow) opt.selected = true;
-    select.appendChild(opt);
-  }
-  select.addEventListener("change", () => {
-    onChange(select.value as TimeWindow);
-  });
-  row.appendChild(select);
-
-  return row;
-}
-
-function renderUsageLoading(body: HTMLElement, onWindowChange: (next: TimeWindow) => void): void {
-  body.replaceChildren();
-  body.appendChild(renderWindowSelector(onWindowChange));
-  const loading = document.createElement("div");
-  loading.className = "usage-line usage-line--dim";
-  loading.textContent = "Loading usage…";
-  body.appendChild(loading);
-}
-
-function renderUsageError(body: HTMLElement, onWindowChange: (next: TimeWindow) => void, message: string): void {
-  body.replaceChildren();
-  body.appendChild(renderWindowSelector(onWindowChange));
-  const error = document.createElement("div");
-  error.className = "usage-line usage-error";
-  error.textContent = `Could not read usage: ${message}`;
-  body.appendChild(error);
-}
-
-function renderUsageResult(
-  body: HTMLElement,
-  onWindowChange: (next: TimeWindow) => void,
-  snapshot: UsageSnapshot,
-  filterAgent: string | null,
-): void {
-  body.replaceChildren();
-  body.appendChild(renderWindowSelector(onWindowChange));
-  const vm = buildPanelViewModel(snapshot, filterAgent);
-  if (vm.sections.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "usage-line usage-line--dim";
-    empty.textContent = "No usage data for this selection.";
-    body.appendChild(empty);
-    return;
-  }
-  for (const section of vm.sections) {
-    body.appendChild(renderUsageSection(section));
-  }
-}
-
-/**
- * Opens (or re-fetches) the usage panel for `action` ("agent-usage" or
- * "agent-usage:<agent>"). `togglePanel` resizes/repositions the window;
- * A window-selector change re-fetches but is never persisted: the panel
- * starts on Today each time it opens (see `usageWindow`).
- */
-async function openUsagePanel(
+async function openSectionPanel(
   action: string,
   body: HTMLElement,
   togglePanel: (open: boolean) => Promise<void>,
 ): Promise<void> {
-  const filterAgent = agentFromAction(action);
-  usagePanelFilter = filterAgent;
-
-  const fetchUsage = async (): Promise<void> => {
-    const token = ++usageFetchToken;
-    renderUsageLoading(body, onWindowChange);
-    try {
-      const snapshot = await invoke<UsageSnapshot>("get_usage", { window: usageWindow });
-      if (token !== usageFetchToken) return; // superseded by a newer fetch
-      renderUsageResult(body, onWindowChange, snapshot, usagePanelFilter);
-    } catch (err) {
-      if (token !== usageFetchToken) return;
-      console.error("orbitbar: get_usage failed", err);
-      renderUsageError(body, onWindowChange, String(err));
-    }
-  };
-
-  function onWindowChange(next: TimeWindow): void {
-    if (usageWindow === next) return;
-    usageWindow = next;
-    void fetchUsage();
-  }
-
+  const sectionId = sectionFromAction(action);
+  const vm = buildSectionViewModel(sectionId);
+  body.replaceChildren(renderSectionView(vm));
   await togglePanel(true);
-  await fetchUsage();
 }
 
 const contextMenuEl = document.querySelector<HTMLElement>("#context-menu");
@@ -1125,18 +942,6 @@ window.addEventListener("DOMContentLoaded", async () => {
       }
     };
 
-    // "Open pricing file" creates pricing.json from the built-in template
-    // first if it does not exist yet (ensure_pricing_file), so the editor
-    // never opens to a missing-file error.
-    const openPricing = async () => {
-      try {
-        const path = await invoke<string>("ensure_pricing_file");
-        await openPath(path);
-      } catch (err) {
-        console.error("orbitbar: could not open pricing.json", err);
-      }
-    };
-
     // Re-reads config.json and re-renders the bar in place — no restart, no
     // window resize beyond what the new collapsed/monitor/margin call for.
     // `cfg` is mutated in place (not replaced) so every closure that already
@@ -1221,7 +1026,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const contextMenuActions = async () =>
       buildContextMenuActions(
         cfg,
-        { openConfig, openPricing, toggleCollapsed, reloadConfig, setTheme, toggleAutostart, toggleExamples, quit },
+        { openConfig, toggleCollapsed, reloadConfig, setTheme, toggleAutostart, toggleExamples, quit },
         themeName,
         (await readAutostart()) ?? cfg.autoStart,
       );
@@ -1305,12 +1110,9 @@ window.addEventListener("DOMContentLoaded", async () => {
           return;
         }
 
-        if (isUsageAction(action)) {
-          // Opening from closed starts on Today; switching agent while the
-          // panel is already open keeps the user's current selection.
-          if (!panelOpen) usageWindow = "today";
+        if (isSectionAction(action)) {
           activePanelAction = action;
-          await openUsagePanel(action, body, togglePanel);
+          await openSectionPanel(action, body, togglePanel);
           return;
         }
 
