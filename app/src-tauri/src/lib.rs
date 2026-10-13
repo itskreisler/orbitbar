@@ -3,7 +3,6 @@ mod config;
 mod launch;
 mod panel;
 mod placement;
-mod usage;
 
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, WebviewWindow};
@@ -34,29 +33,6 @@ fn save_config(app: tauri::AppHandle, cfg: config::AppConfig) -> Result<(), Stri
     config::save(&app, &cfg)
 }
 
-/// Token spend per agent (claude, codex, opencode) and per project over
-/// `window`, read only from each agent's own local files - no external
-/// service or program involved. Runs off the main thread: the readers stream
-/// multi-megabyte jsonl files and query a SQLite database, which would
-/// otherwise stall the window.
-///
-/// `pricing.json` next to `config.json` is (re)loaded on every call, not
-/// cached, so editing it takes effect on the next refresh without an app
-/// restart - the file is small and this runs off the main thread anyway.
-#[tauri::command]
-async fn get_usage(app: tauri::AppHandle, window: usage::TimeWindow) -> Result<usage::UsageSnapshot, String> {
-    let pricing_path = config::config_dir(&app)?.join("pricing.json");
-    tauri::async_runtime::spawn_blocking(move || {
-        let paths = usage::resolve_paths(None).ok_or_else(|| "cannot resolve home directory".to_string())?;
-        let (overrides, pricing_warning) = usage::pricing::load_overrides(&pricing_path);
-        let mut snapshot = usage::collect_usage(window, &paths, chrono::Local::now(), &overrides);
-        snapshot.pricing_warning = pricing_warning;
-        Ok(snapshot)
-    })
-    .await
-    .map_err(|e| format!("usage task panicked: {e}"))?
-}
-
 /// Full path to config.json, for the context menu's
 /// "Edit config" to hand to the opener plugin. Returns the path even if the
 /// file somehow does not exist yet — `get_config` always creates it first on
@@ -65,17 +41,6 @@ async fn get_usage(app: tauri::AppHandle, window: usage::TimeWindow) -> Result<u
 fn get_config_path(app: tauri::AppHandle) -> Result<String, String> {
     let dir = config::config_dir(&app)?;
     Ok(dir.join("config.json").to_string_lossy().into_owned())
-}
-
-/// Creates pricing.json from the built-in template if it is missing, then
-/// returns its path, for "Open pricing file" to hand to the opener plugin.
-/// Never overwrites an existing file - see `config::ensure_pricing_file`.
-#[tauri::command]
-fn ensure_pricing_file(app: tauri::AppHandle) -> Result<String, String> {
-    let dir = config::config_dir(&app)?;
-    let path = dir.join("pricing.json");
-    config::ensure_pricing_file(&path)?;
-    Ok(path.to_string_lossy().into_owned())
 }
 
 /// Runs a cell's `run:<program> [args]` action: spawns the program directly
@@ -368,10 +333,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_config,
             save_config,
-            get_usage,
             quit_app,
             get_config_path,
-            ensure_pricing_file,
             run_command,
             run_panel_command,
             place_window,

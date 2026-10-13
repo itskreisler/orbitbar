@@ -236,10 +236,7 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> Result<(), String> {
     persist(&path, cfg)
 }
 
-/// Resolves the per-user app config dir, creating it if missing. `pub` so
-/// callers outside this module (the `get_usage` command, to find
-/// `pricing.json` next to `config.json`) can reuse the exact same directory
-/// resolution instead of re-deriving it.
+/// Resolves the per-user app config dir, creating it if missing.
 pub fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let resolver = app.path();
     let dir = resolver
@@ -254,76 +251,22 @@ fn persist(path: &PathBuf, cfg: &AppConfig) -> Result<(), String> {
     fs::write(path, json).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
-/// Default content written for a first-time `pricing.json`: the same
-/// explanatory `_readme` as `app/pricing.example.json`, but with an empty
-/// override table instead of the example's `my-local-model` row, so the file
-/// carries no sample data that could be mistaken for something real.
-const PRICING_TEMPLATE: &str = r##"{
-  "_readme": [
-    "Add or override model prices here. get_usage reloads this file on every",
-    "call, so edits apply on the next refresh without restarting the app.",
-    "",
-    "Key under 'models' = a model id, or a prefix of one (e.g. 'claude-opus-5-5'",
-    "also matches 'claude-opus-5-5-20260926'). An entry here wins over a",
-    "built-in row with the exact same key; a longer key always wins over a",
-    "shorter one, built-in or override. Amounts are USD per 1M tokens.",
-    "",
-    "cacheRead / cacheWrite5m / cacheWrite1h are optional. When omitted they",
-    "default to 0.1x, 1.25x and 2x that entry's own input price - Anthropic's",
-    "published cache multipliers."
-  ],
-  "models": {}
-}
-"##;
-
-/// Creates `pricing.json` at `path` from `PRICING_TEMPLATE` if it does not
-/// exist yet, so "Open pricing file" always opens something useful instead
-/// of the OS reporting a missing file. Never touches an existing file, even
-/// an empty or malformed one - once the user has a pricing.json, it is
-/// theirs to edit, not ours to regenerate.
-pub fn ensure_pricing_file(path: &PathBuf) -> Result<(), String> {
-    if path.exists() {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
-    }
-    fs::write(path, PRICING_TEMPLATE).map_err(|e| format!("cannot write {}: {e}", path.display()))
-}
-
 fn default_items() -> Vec<Item> {
-    let tooltip = "none | agent-usage | agent-usage:claude | agent-usage:codex | agent-usage:opencode | open:<url> | run:<program> [args] | panel:<program> [args] | edit-config";
     vec![
         Item {
-            id: "claude".into(),
-            label: "claude".into(),
-            glyph: "0x2733".into(),
-            action: "agent-usage:claude".into(),
-            tooltip: format!("Claude - month history and per-project ({tooltip})"),
+            id: "home".into(),
+            label: "home".into(),
+            glyph: "0x2302".into(),
+            action: "section:home".into(),
+            tooltip: "Home / Dashboard".into(),
             example: false,
         },
         Item {
-            id: "codex".into(),
-            label: "codex".into(),
-            glyph: "0x25CE".into(),
-            action: "agent-usage:codex".into(),
-            tooltip: format!("Codex - month history and per-project ({tooltip})"),
-            example: false,
-        },
-        Item {
-            id: "opencode".into(),
-            label: "opencode".into(),
-            glyph: "0x25C8".into(),
-            action: "agent-usage:opencode".into(),
-            tooltip: format!("Opencode - month history and per-project ({tooltip})"),
-            example: false,
-        },
-        Item {
-            id: "usage".into(),
-            label: "usage".into(),
-            glyph: "0x0024".into(),
-            action: "agent-usage".into(),
-            tooltip: "Live session usage (claude/codex/opencode) - real-time balance".into(),
+            id: "custom".into(),
+            label: "custom".into(),
+            glyph: "0x2261".into(),
+            action: "section:custom".into(),
+            tooltip: "Custom Section".into(),
             example: false,
         },
         Item {
@@ -513,44 +456,6 @@ mod tests {
         let cfg: AppConfig =
             serde_json::from_str(r#"{"theme":"dark","usageWindow":"last7Days"}"#).unwrap();
         assert_eq!(cfg.theme, "dark");
-    }
-
-    /// "Open pricing file" must always open something useful, so a missing
-    /// pricing.json is created from a template with an empty override table
-    /// instead of the OS reporting a file-not-found error.
-    #[test]
-    fn ensure_pricing_file_creates_the_template_when_missing() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("pricing.json");
-        ensure_pricing_file(&path).unwrap();
-        let content = fs::read_to_string(&path).unwrap();
-        assert!(content.contains("\"models\""), "template must be parseable pricing.json shape");
-        // The template itself must be valid pricing.json, not just contain the word.
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert!(parsed["models"].is_object());
-    }
-
-    /// The user's own edits are theirs: an existing pricing.json, even one
-    /// pricing.rs would consider malformed, must never be overwritten by
-    /// "Open pricing file".
-    #[test]
-    fn ensure_pricing_file_never_overwrites_an_existing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("pricing.json");
-        fs::write(&path, r#"{"models":{"x":{"input":1.0,"output":1.0}}}"#).unwrap();
-        ensure_pricing_file(&path).unwrap();
-        let content = fs::read_to_string(&path).unwrap();
-        assert!(content.contains("\"x\""), "existing user content must survive");
-    }
-
-    /// The config dir may not exist yet on a first run — `ensure_pricing_file`
-    /// has to create it, the same as `config_dir` does for config.json.
-    #[test]
-    fn ensure_pricing_file_creates_missing_parent_directories() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nested").join("pricing.json");
-        ensure_pricing_file(&path).unwrap();
-        assert!(path.exists());
     }
 
     /// The shipped bar demonstrates launch actions: one cell opens the project
