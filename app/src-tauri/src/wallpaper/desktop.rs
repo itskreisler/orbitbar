@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::env;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -41,6 +40,7 @@ impl DesktopEnvironmentInfo {
 
         #[cfg(target_os = "linux")]
         {
+            use std::env;
             let wayland_display = env::var("WAYLAND_DISPLAY").ok();
             let xdg_type = env::var("XDG_SESSION_TYPE").unwrap_or_default();
             let desktop = env::var("XDG_CURRENT_DESKTOP")
