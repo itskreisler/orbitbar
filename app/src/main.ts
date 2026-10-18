@@ -22,6 +22,7 @@ import {
   renderSectionView,
   sectionFromAction,
 } from "./section-view";
+import "./wallpaper-api";
 
 export interface ThemePalette {
   name: string;

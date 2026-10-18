@@ -2,6 +2,7 @@
  * View-model and rendering logic for generic sections/pages in the side panel.
  * Designed as a clean template for building custom UI sections.
  */
+import { renderWallpaperEngineSection } from "./wallpaper-editor";
 
 export interface SectionItem {
   label: string;
@@ -84,6 +85,10 @@ export function buildSectionViewModel(sectionId: string): SectionViewModel {
  * Renders a SectionViewModel into a container DOM element.
  */
 export function renderSectionView(vm: SectionViewModel): HTMLElement {
+  if (vm.id === "wallpaper" || vm.id === "wallpaper-engine") {
+    return renderWallpaperEngineSection();
+  }
+
   const container = document.createElement("div");
   container.className = "section-view";
 
