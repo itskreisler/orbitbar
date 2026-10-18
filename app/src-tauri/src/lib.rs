@@ -3,6 +3,7 @@ mod config;
 mod launch;
 mod panel;
 mod placement;
+pub mod wallpaper;
 
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, WebviewWindow};
@@ -284,6 +285,50 @@ fn sync_autostart(app: &tauri::AppHandle, cfg: &config::AppConfig) {
     }
 }
 
+#[tauri::command]
+fn get_wallpaper_environment_info() -> wallpaper::desktop::DesktopEnvironmentInfo {
+    wallpaper::desktop::DesktopEnvironmentInfo::detect()
+}
+
+#[tauri::command]
+fn load_wallpaper_manifest(dir_path: String) -> Result<wallpaper::manifest::WallpaperManifest, String> {
+    let instance = wallpaper::runtime::WallpaperRuntimeInstance::load_from_dir(dir_path)?;
+    Ok(instance.manifest)
+}
+
+#[tauri::command]
+fn get_wallpaper_store(app: tauri::AppHandle) -> Result<wallpaper::store::WallpaperStore, String> {
+    let dir = config::config_dir(&app)?;
+    let store_path = dir.join("wallpaper_store.json");
+    Ok(wallpaper::store::WallpaperStore::load_or_default(&store_path))
+}
+
+#[tauri::command]
+fn save_wallpaper_store(app: tauri::AppHandle, store: wallpaper::store::WallpaperStore) -> Result<(), String> {
+    let dir = config::config_dir(&app)?;
+    let store_path = dir.join("wallpaper_store.json");
+    store.save(&store_path)
+}
+
+#[tauri::command]
+fn format_wallpaper_properties(
+    properties: std::collections::HashMap<String, wallpaper::properties::PropertyValue>,
+) -> std::collections::HashMap<String, wallpaper::properties::WallpaperPropertyPayload> {
+    wallpaper::properties::format_apply_user_properties(&properties)
+}
+
+#[tauri::command]
+fn set_static_wallpaper(image_path: String) -> Result<(), String> {
+    use wallpaper::desktop::DesktopAdapter;
+    let adapter = wallpaper::desktop::PlatformDesktopAdapter::new();
+    adapter.set_static_wallpaper(std::path::Path::new(&image_path))
+}
+
+#[tauri::command]
+fn get_wallpaper_performance_metrics() -> wallpaper::media::PerformanceMetrics {
+    wallpaper::media::PerformanceMetrics::default()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -338,7 +383,14 @@ pub fn run() {
             run_command,
             run_panel_command,
             place_window,
-            plan_window
+            plan_window,
+            get_wallpaper_environment_info,
+            load_wallpaper_manifest,
+            get_wallpaper_store,
+            save_wallpaper_store,
+            format_wallpaper_properties,
+            set_static_wallpaper,
+            get_wallpaper_performance_metrics
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
